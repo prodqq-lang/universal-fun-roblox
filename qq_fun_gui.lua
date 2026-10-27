@@ -1,6 +1,6 @@
 --[[
     QQ Fun GUI  -  Version: hello world
-    Tabs: Movement | Body | World | Theme | Settings
+    Tabs: Movement | Abilities | World | Theme | Settings
     RightShift hides / shows the window. Re-executing cleans up the previous run.
 ]]
 
@@ -110,9 +110,15 @@ local S = {
 	Bhop = false,
 	Speed = false, SpeedVal = 60,
 	Fly = false, FlySpeed = 60,
-	Size = false, SizeVal = 3,
-	BigHead = false, HeadVal = 3,
-	Rainbow = false,
+	Dash = false, DashVal = 110,
+	DoubleJump = false,
+	LongJump = false, LongVal = 60,
+	Glide = false, GlideVal = 12,
+	SlowFall = false, SlowFallVal = 10,
+	Sprint = false, SprintVal = 2,
+	Rocket = false, RocketVal = 80,
+	WallClimb = false, ClimbVal = 40,
+	ClickTP = false,
 	Spin = false, SpinSpeed = 720,
 	Moonwalk = false,
 	Disco = false,
@@ -374,26 +380,6 @@ end
 ----------------------------------------------------------------
 -- Effect helpers (restore things when switched off)
 ----------------------------------------------------------------
-local function setScales()
-	local hum = getHum()
-	if not hum then return end
-	local size = S.Size and S.SizeVal or 1
-	for _, n in ipairs({ "BodyHeightScale", "BodyWidthScale", "BodyDepthScale" }) do
-		local v = hum:FindFirstChild(n)
-		if v then v.Value = size end
-	end
-	local hs = hum:FindFirstChild("HeadScale")
-	if hs then hs.Value = S.BigHead and S.HeadVal or 1 end
-end
-
-local rainbowOrig = {}
-local function restoreRainbow()
-	for part, col in pairs(rainbowOrig) do
-		if part.Parent then part.Color = col end
-	end
-	table.clear(rainbowOrig)
-end
-
 local lightOrig
 local function restoreLighting()
 	if lightOrig then
@@ -456,21 +442,40 @@ Slider(moveScroll, "Fly Speed", 10, 200, 60, 0, function(v) S.FlySpeed = v end)
 ----------------------------------------------------------------
 -- BODY TAB
 ----------------------------------------------------------------
-local bodyPage = addTab("Body")
-local bodyScroll = scrollPage(bodyPage)
+local abilityPage = addTab("Abilities")
+local abScroll = scrollPage(abilityPage)
 
-Section(bodyScroll, "Silly Bodies")
-FX(bodyScroll, "Giant / Tiny Mode", "Size", function() setScales() end)
-Slider(bodyScroll, "Body Size", 0.25, 6, 3, 2, function(v) S.SizeVal = v; if S.Size then setScales() end end)
-FX(bodyScroll, "Big Head", "BigHead", function() setScales() end)
-Slider(bodyScroll, "Head Size", 0.5, 8, 3, 2, function(v) S.HeadVal = v; if S.BigHead then setScales() end end)
-Note(bodyScroll, "Body / head sizes need an R15 character (local only, other players won't see it).", 30)
+Section(abScroll, "Dashes & Jumps")
+FX(abScroll, "Dash (press Q)", "Dash")
+Slider(abScroll, "Dash Power", 40, 300, 110, 0, function(v) S.DashVal = v end)
+FX(abScroll, "Double Jump", "DoubleJump")
+FX(abScroll, "Long Jump (boost forward on jump)", "LongJump")
+Slider(abScroll, "Long Jump Power", 10, 200, 60, 0, function(v) S.LongVal = v end)
 
-Section(bodyScroll, "Style")
-FX(bodyScroll, "Rainbow Character", "Rainbow", function(v) if not v then restoreRainbow() end end)
-FX(bodyScroll, "Spin", "Spin")
-Slider(bodyScroll, "Spin Speed (deg/s)", 60, 3000, 720, 0, function(v) S.SpinSpeed = v end)
-FX(bodyScroll, "Moonwalk (walk backwards)", "Moonwalk", function(v)
+Section(abScroll, "Falling")
+FX(abScroll, "Glide (hold Space in the air)", "Glide")
+Slider(abScroll, "Glide Fall Speed", 2, 60, 12, 0, function(v) S.GlideVal = v end)
+FX(abScroll, "Slow Fall (always floaty)", "SlowFall")
+Slider(abScroll, "Max Fall Speed", 2, 80, 10, 0, function(v) S.SlowFallVal = v end)
+
+Section(abScroll, "Boosters")
+FX(abScroll, "Sprint (hold Shift)", "Sprint", function(v)
+	if not v and not S.Speed then
+		local hum = getHum()
+		if hum then hum.WalkSpeed = O.WalkSpeed or 16 end
+	end
+end)
+Slider(abScroll, "Sprint Multiplier", 1.2, 6, 2, 1, function(v) S.SprintVal = v end)
+FX(abScroll, "Rocket Boost (hold E)", "Rocket")
+Slider(abScroll, "Rocket Max Speed", 20, 250, 80, 0, function(v) S.RocketVal = v end)
+FX(abScroll, "Wall Climb (hold W into a wall)", "WallClimb")
+Slider(abScroll, "Climb Speed", 10, 120, 40, 0, function(v) S.ClimbVal = v end)
+FX(abScroll, "Click Teleport (Ctrl + Click)", "ClickTP")
+
+Section(abScroll, "Spins & Style")
+FX(abScroll, "Spin", "Spin")
+Slider(abScroll, "Spin Speed (deg/s)", 60, 3000, 720, 0, function(v) S.SpinSpeed = v end)
+FX(abScroll, "Moonwalk (walk backwards)", "Moonwalk", function(v)
 	local hum = getHum()
 	if hum then hum.AutoRotate = not v end
 end)
@@ -620,7 +625,6 @@ local function unload()
 	disableAll()
 	workspace.Gravity = origGravity
 	env.QQFunGravity = nil
-	restoreRainbow()
 	restoreLighting()
 	restoreFOV()
 	local hum = getHum()
@@ -640,6 +644,7 @@ Button(setScroll, "Unload GUI", unload)
 -- MAIN LOOPS
 ----------------------------------------------------------------
 local iceVel = Vector3.zero
+local extraJumpUsed = false
 local prevGrounded, lastY = true, 0
 local rayParams = RaycastParams.new()
 rayParams.FilterType = Enum.RaycastFilterType.Exclude
@@ -677,6 +682,53 @@ connect(RunService.PreSimulation, function(dt)
 	if S.Bouncy and grounded and not prevGrounded and lastY < -25 then
 		root.AssemblyLinearVelocity = Vector3.new(vel.X, math.min(-lastY * S.BounceVal, 200), vel.Z)
 		vel = root.AssemblyLinearVelocity
+	end
+
+	-- sprint (hold Shift)
+	if S.Sprint and not S.Speed then
+		local base = O.WalkSpeed or 16
+		hum.WalkSpeed = keyDown(Enum.KeyCode.LeftShift) and base * S.SprintVal or base
+	end
+
+	if grounded then extraJumpUsed = false end
+
+	-- long jump: forward burst the moment you leave the ground
+	if S.LongJump and prevGrounded and not grounded and vel.Y > 10 then
+		local md = hum.MoveDirection
+		if md.Magnitude > 0 then
+			local boost = md.Unit * S.LongVal
+			vel = vel + Vector3.new(boost.X, 0, boost.Z)
+			root.AssemblyLinearVelocity = vel
+			iceVel = Vector3.new(vel.X, 0, vel.Z)
+		end
+	end
+
+	-- glide / slow fall: cap downward speed
+	if not grounded then
+		local limit
+		if S.SlowFall then limit = S.SlowFallVal end
+		if S.Glide and keyDown(Enum.KeyCode.Space) then
+			limit = math.min(limit or math.huge, S.GlideVal)
+		end
+		if limit and vel.Y < -limit then
+			vel = Vector3.new(vel.X, -limit, vel.Z)
+			root.AssemblyLinearVelocity = vel
+		end
+	end
+
+	-- rocket boost (hold E)
+	if S.Rocket and keyDown(Enum.KeyCode.E) and vel.Y < S.RocketVal then
+		vel = Vector3.new(vel.X, math.min(vel.Y + 400 * dt, S.RocketVal), vel.Z)
+		root.AssemblyLinearVelocity = vel
+	end
+
+	-- wall climb (hold W while facing a wall)
+	if S.WallClimb and keyDown(Enum.KeyCode.W) then
+		local hit = workspace:Raycast(root.Position, root.CFrame.LookVector * 2.5, rayParams)
+		if hit and hit.Instance.CanCollide then
+			vel = Vector3.new(vel.X, S.ClimbVal, vel.Z)
+			root.AssemblyLinearVelocity = vel
+		end
 	end
 
 	if S.Fly then
@@ -719,9 +771,47 @@ connect(RunService.PreSimulation, function(dt)
 end)
 
 connect(UIS.JumpRequest, function()
+	local hum, root = getHum(), getRoot()
+	if not hum or not root then return end
 	if S.InfJump then
-		local hum = getHum()
-		if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+		hum:ChangeState(Enum.HumanoidStateType.Jumping)
+	elseif S.DoubleJump and hum.FloorMaterial == Enum.Material.Air and not extraJumpUsed then
+		extraJumpUsed = true
+		local jp = hum.UseJumpPower and hum.JumpPower or math.sqrt(2 * workspace.Gravity * hum.JumpHeight)
+		local v = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = Vector3.new(v.X, jp, v.Z)
+	end
+end)
+
+-- dash (Q) and click teleport (Ctrl + Click)
+local lastDash = 0
+connect(UIS.InputBegan, function(input, gp)
+	if gp then return end
+	local hum, root = getHum(), getRoot()
+	if not hum or not root then return end
+
+	if input.KeyCode == Enum.KeyCode.Q and S.Dash and os.clock() - lastDash > 0.6 then
+		lastDash = os.clock()
+		local dir = hum.MoveDirection
+		if dir.Magnitude < 0.1 then
+			local lv = root.CFrame.LookVector
+			dir = Vector3.new(lv.X, 0, lv.Z).Unit
+		end
+		iceVel = dir * S.DashVal
+		local v = root.AssemblyLinearVelocity
+		root.AssemblyLinearVelocity = Vector3.new(iceVel.X, v.Y + 8, iceVel.Z)
+
+	elseif input.UserInputType == Enum.UserInputType.MouseButton1 and S.ClickTP and UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+		local cam = workspace.CurrentCamera
+		local loc = UIS:GetMouseLocation()
+		local ray = cam:ViewportPointToRay(loc.X, loc.Y)
+		rayParams.FilterDescendantsInstances = { getChar() }
+		local hit = workspace:Raycast(ray.Origin, ray.Direction * 1000, rayParams)
+		if hit then
+			root.CFrame = CFrame.new(hit.Position + Vector3.new(0, 3, 0))
+			root.AssemblyLinearVelocity = Vector3.zero
+			iceVel = Vector3.zero
+		end
 	end
 end)
 
@@ -746,20 +836,6 @@ end)
 local rbAcc = 0
 connect(RunService.RenderStepped, function(dt)
 	local t = os.clock()
-
-	if S.Rainbow then
-		local char = getChar()
-		if char then
-			local hue, i = (t * 0.4) % 1, 0
-			for _, d in ipairs(char:GetDescendants()) do
-				if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
-					if not rainbowOrig[d] then rainbowOrig[d] = d.Color end
-					i += 1
-					d.Color = Color3.fromHSV((hue + i * 0.04) % 1, 0.8, 1)
-				end
-			end
-		end
-	end
 
 	if S.Disco and lightOrig then
 		local h = (t * 0.5) % 1
@@ -801,14 +877,13 @@ end)
 
 -- respawn handling
 connect(LocalPlayer.CharacterAdded, function(char)
-	table.clear(rainbowOrig)
 	iceVel = Vector3.zero
 	prevGrounded, lastY = true, 0
+	extraJumpUsed = false
 	local hum = char:WaitForChild("Humanoid", 10)
 	if hum then
 		task.wait(0.5)
 		captureOriginals()
-		setScales()
 		if S.Moonwalk then hum.AutoRotate = false end
 	end
 end)
